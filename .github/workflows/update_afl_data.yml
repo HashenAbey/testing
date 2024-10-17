@@ -1,0 +1,58 @@
+name: Update AFL Data
+
+on:
+  schedule:
+    - cron: '0 0 * * 0'  # Runs at 00:00 every Sunday
+  workflow_dispatch:  # Allows manual triggering
+
+jobs:
+  update-data:
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_PAT: ${{ secrets.GH_PAT }}
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+      with:
+        token: ${{ secrets.GH_PAT }}
+    
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libcurl4-openssl-dev libssl-dev libxml2-dev libgit2-dev jq
+
+    - name: Set up R
+      uses: r-lib/actions/setup-r@v2
+      
+    - name: Install R dependencies
+      run: |
+        install.packages(c("remotes", "curl"), repos = "https://cloud.r-project.org", dependencies = TRUE)
+        Sys.setenv(GITHUB_PAT = Sys.getenv("GITHUB_PAT"))
+        remotes::install_github("jimmyday12/fitzRoy")
+      shell: Rscript {0}
+      
+    - name: Run R script
+      run: Rscript update_afl_data.R
+      
+    - name: Commit and push if changed
+      env:
+        GH_PAT: ${{ secrets.GH_PAT }}
+      run: |
+        git config --global user.email "action@github.com"
+        git config --global user.name "GitHub Action"
+        git add -A
+        git commit -m "Update AFL data" || exit 0
+        git push https://${GH_PAT}@github.com/${GITHUB_REPOSITORY}.git
+
+    - name: Upload CSVs to PythonAnywhere
+      env:
+        PYTHONANYWHERE_TOKEN: ${{ secrets.PYTHONANYWHERE_TOKEN }}
+      run: |
+        curl -X POST \
+          -H "Authorization: Token $PYTHONANYWHERE_TOKEN" \
+          -F "content=@afl_match_results.csv" \
+          https://www.pythonanywhere.com/api/v0/user/testingafl/files/path/home/testingafl/afl_ranking_system/afl_match_results.csv
+        curl -X POST \
+          -H "Authorization: Token $PYTHONANYWHERE_TOKEN" \
+          -F "content=@afl_match_results_concise.csv" \
+          https://www.pythonanywhere.com/api/v0/user/testingafl/files/path/home/testingafl/afl_ranking_system/afl_match_results_concise.csv
